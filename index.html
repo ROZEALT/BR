@@ -1,0 +1,325 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Simple Battle Royale</title>
+    <style>
+        body { margin: 0; background: black; }
+        canvas { display: block; margin: 0 auto; }
+    </style>
+</head>
+<body>
+    <canvas id="gameCanvas" width="800" height="600"></canvas>
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+
+        const SCREEN_WIDTH = 800;
+        const SCREEN_HEIGHT = 600;
+
+        const BLACK = '#000000';
+        const WHITE = '#FFFFFF';
+        const GREEN = '#00FF00';
+        const RED = '#FF0000';
+        const BLUE = '#0000FF';
+
+        const PLAYER_RADIUS = 10;
+        const PLAYER_SPEED = 5;
+        const PLAYER_HEALTH = 100;
+
+        const BULLET_SPEED = 10;
+        const BULLET_RADIUS = 3;
+
+        const INITIAL_ZONE_RADIUS = 300;
+        const ZONE_SHRINK_SPEED = 0.1;
+
+        const ITEM_RADIUS = 5;
+        const WEAPON_DAMAGE = 20;
+
+        const NUM_AI = 5;
+        const AI_SPEED = 3;
+
+        class Player {
+            constructor(x, y) {
+                this.x = x;
+                this.y = y;
+                this.health = PLAYER_HEALTH;
+                this.hasWeapon = false;
+                this.angle = 0;
+            }
+
+            move(dx, dy) {
+                this.x += dx;
+                this.y += dy;
+                this.x = Math.max(PLAYER_RADIUS, Math.min(SCREEN_WIDTH - PLAYER_RADIUS, this.x));
+                this.y = Math.max(PLAYER_RADIUS, Math.min(SCREEN_HEIGHT - PLAYER_RADIUS, this.y));
+            }
+
+            draw() {
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, PLAYER_RADIUS, 0, Math.PI * 2);
+                ctx.fillStyle = GREEN;
+                ctx.fill();
+                ctx.closePath();
+
+                // Health bar
+                ctx.fillStyle = RED;
+                ctx.fillRect(this.x - PLAYER_RADIUS, this.y - PLAYER_RADIUS - 10, PLAYER_RADIUS * 2 * (this.health / PLAYER_HEALTH), 5);
+            }
+
+            shoot(bullets) {
+                if (this.hasWeapon) {
+                    bullets.push(new Bullet(this.x, this.y, this.angle));
+                }
+            }
+        }
+
+        class AI {
+            constructor(x, y) {
+                this.x = x;
+                this.y = y;
+                this.health = PLAYER_HEALTH;
+                this.hasWeapon = Math.random() < 0.5;
+            }
+
+            moveTowards(targetX, targetY) {
+                const dx = targetX - this.x;
+                const dy = targetY - this.y;
+                const dist = Math.hypot(dx, dy);
+                if (dist > 0) {
+                    this.x += (dx / dist) * AI_SPEED;
+                    this.y += (dy / dist) * AI_SPEED;
+                }
+            }
+
+            draw() {
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, PLAYER_RADIUS, 0, Math.PI * 2);
+                ctx.fillStyle = BLUE;
+                ctx.fill();
+                ctx.closePath();
+
+                // Health bar
+                ctx.fillStyle = RED;
+                ctx.fillRect(this.x - PLAYER_RADIUS, this.y - PLAYER_RADIUS - 10, PLAYER_RADIUS * 2 * (this.health / PLAYER_HEALTH), 5);
+            }
+        }
+
+        class Bullet {
+            constructor(x, y, angle) {
+                this.x = x;
+                this.y = y;
+                this.dx = Math.cos(angle) * BULLET_SPEED;
+                this.dy = Math.sin(angle) * BULLET_SPEED;
+            }
+
+            update() {
+                this.x += this.dx;
+                this.y += this.dy;
+            }
+
+            draw() {
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, BULLET_RADIUS, 0, Math.PI * 2);
+                ctx.fillStyle = WHITE;
+                ctx.fill();
+                ctx.closePath();
+            }
+        }
+
+        class Item {
+            constructor(x, y, type) {
+                this.x = x;
+                this.y = y;
+                this.type = type; // 'weapon' or 'health'
+            }
+
+            draw() {
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, ITEM_RADIUS, 0, Math.PI * 2);
+                ctx.fillStyle = this.type === 'weapon' ? RED : GREEN;
+                ctx.fill();
+                ctx.closePath();
+            }
+        }
+
+        class Zone {
+            constructor(centerX, centerY, radius) {
+                this.centerX = centerX;
+                this.centerY = centerY;
+                this.radius = radius;
+            }
+
+            shrink() {
+                this.radius -= ZONE_SHRINK_SPEED;
+                if (this.radius < 10) this.radius = 10;
+            }
+
+            draw() {
+                ctx.beginPath();
+                ctx.arc(this.centerX, this.centerY, this.radius, 0, Math.PI * 2);
+                ctx.strokeStyle = RED;
+                ctx.lineWidth = 2;
+                ctx.stroke();
+                ctx.closePath();
+            }
+
+            isInside(x, y) {
+                return Math.hypot(x - this.centerX, y - this.centerY) <= this.radius;
+            }
+        }
+
+        function checkCollision(obj1X, obj1Y, obj1R, obj2X, obj2Y, obj2R) {
+            return Math.hypot(obj1X - obj2X, obj1Y - obj2Y) < obj1R + obj2R;
+        }
+
+        // Game variables
+        let player = new Player(SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2);
+        let ais = [];
+        for (let i = 0; i < NUM_AI; i++) {
+            ais.push(new AI(Math.random() * SCREEN_WIDTH, Math.random() * SCREEN_HEIGHT));
+        }
+        let items = [];
+        for (let i = 0; i < 10; i++) {
+            const type = Math.random() < 0.5 ? 'weapon' : 'health';
+            items.push(new Item(Math.random() * SCREEN_WIDTH, Math.random() * SCREEN_HEIGHT, type));
+        }
+        let bullets = [];
+        let zone = new Zone(SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2, INITIAL_ZONE_RADIUS);
+
+        let keys = {};
+        let mouseX = 0, mouseY = 0;
+        let gameOver = false;
+        let win = false;
+
+        // Event listeners
+        window.addEventListener('keydown', (e) => { keys[e.key] = true; });
+        window.addEventListener('keyup', (e) => { keys[e.key] = false; });
+        canvas.addEventListener('mousemove', (e) => {
+            const rect = canvas.getBoundingClientRect();
+            mouseX = e.clientX - rect.left;
+            mouseY = e.clientY - rect.top;
+        });
+        canvas.addEventListener('click', () => {
+            player.shoot(bullets);
+        });
+
+        function update() {
+            if (gameOver) return;
+
+            // Clear canvas
+            ctx.fillStyle = BLACK;
+            ctx.fillRect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
+
+            // Player movement
+            let dx = 0, dy = 0;
+            if (keys['w'] || keys['W']) dy -= PLAYER_SPEED;
+            if (keys['s'] || keys['S']) dy += PLAYER_SPEED;
+            if (keys['a'] || keys['A']) dx -= PLAYER_SPEED;
+            if (keys['d'] || keys['D']) dx += PLAYER_SPEED;
+            if (dx !== 0 && dy !== 0) {
+                dx /= Math.sqrt(2);
+                dy /= Math.sqrt(2);
+            }
+            player.move(dx, dy);
+
+            // Update angle
+            player.angle = Math.atan2(mouseY - player.y, mouseX - player.x);
+
+            // AI logic
+            ais = ais.filter(ai => ai.health > 0);
+            ais.forEach(ai => {
+                ai.moveTowards(player.x, player.y);
+                if (ai.hasWeapon && Math.random() < 0.01) {
+                    const aiAngle = Math.atan2(player.y - ai.y, player.x - ai.x);
+                    bullets.push(new Bullet(ai.x, ai.y, aiAngle));
+                }
+            });
+
+            // Update bullets
+            bullets = bullets.filter(bullet => {
+                bullet.update();
+                if (bullet.x < 0 || bullet.x > SCREEN_WIDTH || bullet.y < 0 || bullet.y > SCREEN_HEIGHT) {
+                    return false;
+                }
+
+                // Hit player
+                if (checkCollision(bullet.x, bullet.y, BULLET_RADIUS, player.x, player.y, PLAYER_RADIUS)) {
+                    player.health -= WEAPON_DAMAGE;
+                    if (player.health <= 0) {
+                        gameOver = true;
+                    }
+                    return false;
+                }
+
+                // Hit AI
+                ais.forEach((ai, index) => {
+                    if (checkCollision(bullet.x, bullet.y, BULLET_RADIUS, ai.x, ai.y, PLAYER_RADIUS)) {
+                        ai.health -= WEAPON_DAMAGE;
+                        if (ai.health <= 0) {
+                            ais.splice(index, 1);
+                        }
+                        bullets = bullets.filter(b => b !== bullet);
+                    }
+                });
+
+                return true;
+            });
+
+            // Pickup items
+            items = items.filter(item => {
+                if (checkCollision(player.x, player.y, PLAYER_RADIUS, item.x, item.y, ITEM_RADIUS)) {
+                    if (item.type === 'weapon') {
+                        player.hasWeapon = true;
+                    } else if (item.type === 'health') {
+                        player.health = Math.min(PLAYER_HEALTH, player.health + 50);
+                    }
+                    return false;
+                }
+                return true;
+            });
+
+            // Zone
+            zone.shrink();
+            if (!zone.isInside(player.x, player.y)) {
+                player.health -= 1;
+                if (player.health <= 0) gameOver = true;
+            }
+            ais.forEach(ai => {
+                if (!zone.isInside(ai.x, ai.y)) {
+                    ai.health -= 1;
+                }
+            });
+            ais = ais.filter(ai => ai.health > 0);
+
+            // Draw
+            zone.draw();
+            player.draw();
+            ais.forEach(ai => ai.draw());
+            items.forEach(item => item.draw());
+            bullets.forEach(bullet => bullet.draw());
+
+            // Health text
+            ctx.font = '36px Arial';
+            ctx.fillStyle = WHITE;
+            ctx.fillText(`Health: ${Math.floor(player.health)}`, 10, 40);
+
+            // Win condition
+            if (ais.length === 0) {
+                win = true;
+                gameOver = true;
+            }
+
+            if (gameOver) {
+                ctx.fillStyle = win ? GREEN : RED;
+                ctx.fillText(win ? 'You Win!' : 'Game Over', SCREEN_WIDTH / 2 - 100, SCREEN_HEIGHT / 2);
+            }
+
+            requestAnimationFrame(update);
+        }
+
+        update();
+    </script>
+</body>
+</html>
