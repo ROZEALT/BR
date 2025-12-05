@@ -3,278 +3,296 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Simple Battle Royale</title>
+    <title>Simple 3D Battle Royale</title>
     <style>
-        body { margin: 0; background: black; }
-        canvas { display: block; margin: 0 auto; }
+        body { margin: 0; background: black; overflow: hidden; }
     </style>
+    <script src="https://threejs.org/build/three.js"></script>
 </head>
 <body>
-    <canvas id="gameCanvas" width="800" height="600"></canvas>
     <script>
-        const canvas = document.getElementById('gameCanvas');
-        const ctx = canvas.getContext('2d');
-
-        const SCREEN_WIDTH = 800;
-        const SCREEN_HEIGHT = 600;
-
-        const BLACK = '#000000';
-        const WHITE = '#FFFFFF';
-        const GREEN = '#00FF00';
-        const RED = '#FF0000';
-        const BLUE = '#0000FF';
-
-        const PLAYER_RADIUS = 10;
-        const PLAYER_SPEED = 5;
+        // Constants
+        const PLAYER_RADIUS = 5;
+        const PLAYER_HEIGHT = 10;
+        const PLAYER_SPEED = 2;
         const PLAYER_HEALTH = 100;
 
-        const BULLET_SPEED = 10;
-        const BULLET_RADIUS = 3;
+        const BULLET_SPEED = 5;
+        const BULLET_RADIUS = 1;
 
-        const INITIAL_ZONE_RADIUS = 300;
-        const ZONE_SHRINK_SPEED = 0.1;
+        const INITIAL_ZONE_RADIUS = 150;
+        const ZONE_SHRINK_SPEED = 0.05;
 
-        const ITEM_RADIUS = 5;
+        const ITEM_RADIUS = 2;
         const WEAPON_DAMAGE = 20;
 
         const NUM_AI = 5;
-        const AI_SPEED = 3;
+        const AI_SPEED = 1;
 
+        const GROUND_SIZE = 400;
+
+        // Scene setup
+        const scene = new THREE.Scene();
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        const renderer = new THREE.WebGLRenderer();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        document.body.appendChild(renderer.domElement);
+
+        // Lighting
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
+        scene.add(ambientLight);
+        const directionalLight = new THREE.DirectionalLight(0xffffff, 0.5);
+        directionalLight.position.set(0, 50, 0);
+        scene.add(directionalLight);
+
+        // Ground
+        const groundGeometry = new THREE.PlaneGeometry(GROUND_SIZE, GROUND_SIZE);
+        const groundMaterial = new THREE.MeshBasicMaterial({ color: 0x333333, side: THREE.DoubleSide });
+        const ground = new THREE.Mesh(groundGeometry, groundMaterial);
+        ground.rotation.x = -Math.PI / 2;
+        scene.add(ground);
+
+        // Player class
         class Player {
-            constructor(x, y) {
-                this.x = x;
-                this.y = y;
+            constructor(x, z) {
+                this.position = new THREE.Vector3(x, PLAYER_HEIGHT / 2, z);
                 this.health = PLAYER_HEALTH;
                 this.hasWeapon = false;
-                this.angle = 0;
+                this.mesh = new THREE.Mesh(
+                    new THREE.CylinderGeometry(PLAYER_RADIUS, PLAYER_RADIUS, PLAYER_HEIGHT, 32),
+                    new THREE.MeshBasicMaterial({ color: 0x00ff00 })
+                );
+                this.mesh.position.copy(this.position);
+                scene.add(this.mesh);
             }
 
-            move(dx, dy) {
-                this.x += dx;
-                this.y += dy;
-                this.x = Math.max(PLAYER_RADIUS, Math.min(SCREEN_WIDTH - PLAYER_RADIUS, this.x));
-                this.y = Math.max(PLAYER_RADIUS, Math.min(SCREEN_HEIGHT - PLAYER_RADIUS, this.y));
+            move(dx, dz) {
+                this.position.x += dx;
+                this.position.z += dz;
+                this.position.x = Math.max(-GROUND_SIZE / 2 + PLAYER_RADIUS, Math.min(GROUND_SIZE / 2 - PLAYER_RADIUS, this.position.x));
+                this.position.z = Math.max(-GROUND_SIZE / 2 + PLAYER_RADIUS, Math.min(GROUND_SIZE / 2 - PLAYER_RADIUS, this.position.z));
+                this.mesh.position.copy(this.position);
             }
 
-            draw() {
-                ctx.beginPath();
-                ctx.arc(this.x, this.y, PLAYER_RADIUS, 0, Math.PI * 2);
-                ctx.fillStyle = GREEN;
-                ctx.fill();
-                ctx.closePath();
-
-                // Health bar
-                ctx.fillStyle = RED;
-                ctx.fillRect(this.x - PLAYER_RADIUS, this.y - PLAYER_RADIUS - 10, PLAYER_RADIUS * 2 * (this.health / PLAYER_HEALTH), 5);
-            }
-
-            shoot(bullets) {
+            shoot(bullets, direction) {
                 if (this.hasWeapon) {
-                    bullets.push(new Bullet(this.x, this.y, this.angle));
+                    bullets.push(new Bullet(this.position.clone(), direction));
                 }
             }
         }
 
+        // AI class
         class AI {
-            constructor(x, y) {
-                this.x = x;
-                this.y = y;
+            constructor(x, z) {
+                this.position = new THREE.Vector3(x, PLAYER_HEIGHT / 2, z);
                 this.health = PLAYER_HEALTH;
                 this.hasWeapon = Math.random() < 0.5;
+                this.mesh = new THREE.Mesh(
+                    new THREE.CylinderGeometry(PLAYER_RADIUS, PLAYER_RADIUS, PLAYER_HEIGHT, 32),
+                    new THREE.MeshBasicMaterial({ color: 0x0000ff })
+                );
+                this.mesh.position.copy(this.position);
+                scene.add(this.mesh);
             }
 
-            moveTowards(targetX, targetY) {
-                const dx = targetX - this.x;
-                const dy = targetY - this.y;
-                const dist = Math.hypot(dx, dy);
+            moveTowards(target) {
+                const dx = target.x - this.position.x;
+                const dz = target.z - this.position.z;
+                const dist = Math.hypot(dx, dz);
                 if (dist > 0) {
-                    this.x += (dx / dist) * AI_SPEED;
-                    this.y += (dy / dist) * AI_SPEED;
+                    this.position.x += (dx / dist) * AI_SPEED;
+                    this.position.z += (dz / dist) * AI_SPEED;
+                    this.mesh.position.copy(this.position);
                 }
-            }
-
-            draw() {
-                ctx.beginPath();
-                ctx.arc(this.x, this.y, PLAYER_RADIUS, 0, Math.PI * 2);
-                ctx.fillStyle = BLUE;
-                ctx.fill();
-                ctx.closePath();
-
-                // Health bar
-                ctx.fillStyle = RED;
-                ctx.fillRect(this.x - PLAYER_RADIUS, this.y - PLAYER_RADIUS - 10, PLAYER_RADIUS * 2 * (this.health / PLAYER_HEALTH), 5);
             }
         }
 
+        // Bullet class
         class Bullet {
-            constructor(x, y, angle) {
-                this.x = x;
-                this.y = y;
-                this.dx = Math.cos(angle) * BULLET_SPEED;
-                this.dy = Math.sin(angle) * BULLET_SPEED;
+            constructor(position, direction) {
+                this.position = position.clone();
+                this.direction = direction.clone().normalize().multiplyScalar(BULLET_SPEED);
+                this.mesh = new THREE.Mesh(
+                    new THREE.SphereGeometry(BULLET_RADIUS, 8, 8),
+                    new THREE.MeshBasicMaterial({ color: 0xffffff })
+                );
+                this.mesh.position.copy(this.position);
+                scene.add(this.mesh);
             }
 
             update() {
-                this.x += this.dx;
-                this.y += this.dy;
-            }
-
-            draw() {
-                ctx.beginPath();
-                ctx.arc(this.x, this.y, BULLET_RADIUS, 0, Math.PI * 2);
-                ctx.fillStyle = WHITE;
-                ctx.fill();
-                ctx.closePath();
+                this.position.add(this.direction);
+                this.mesh.position.copy(this.position);
             }
         }
 
+        // Item class
         class Item {
-            constructor(x, y, type) {
-                this.x = x;
-                this.y = y;
-                this.type = type; // 'weapon' or 'health'
-            }
-
-            draw() {
-                ctx.beginPath();
-                ctx.arc(this.x, this.y, ITEM_RADIUS, 0, Math.PI * 2);
-                ctx.fillStyle = this.type === 'weapon' ? RED : GREEN;
-                ctx.fill();
-                ctx.closePath();
+            constructor(x, z, type) {
+                this.position = new THREE.Vector3(x, ITEM_RADIUS, z);
+                this.type = type;
+                this.mesh = new THREE.Mesh(
+                    new THREE.SphereGeometry(ITEM_RADIUS, 16, 16),
+                    new THREE.MeshBasicMaterial({ color: type === 'weapon' ? 0xff0000 : 0x00ff00 })
+                );
+                this.mesh.position.copy(this.position);
+                scene.add(this.mesh);
             }
         }
 
+        // Zone class (visualized as a cylinder for simplicity)
         class Zone {
-            constructor(centerX, centerY, radius) {
-                this.centerX = centerX;
-                this.centerY = centerY;
+            constructor(radius) {
+                this.center = new THREE.Vector3(0, 0, 0);
                 this.radius = radius;
+                this.mesh = new THREE.Mesh(
+                    new THREE.CylinderGeometry(radius, radius, 1, 64, 1, true),
+                    new THREE.MeshBasicMaterial({ color: 0xff0000, side: THREE.DoubleSide, transparent: true, opacity: 0.3 })
+                );
+                this.mesh.position.y = 0.5;
+                this.mesh.rotation.x = Math.PI / 2;
+                scene.add(this.mesh);
             }
 
             shrink() {
                 this.radius -= ZONE_SHRINK_SPEED;
-                if (this.radius < 10) this.radius = 10;
+                if (this.radius < 5) this.radius = 5;
+                this.mesh.scale.set(this.radius / INITIAL_ZONE_RADIUS, 1, this.radius / INITIAL_ZONE_RADIUS);
             }
 
-            draw() {
-                ctx.beginPath();
-                ctx.arc(this.centerX, this.centerY, this.radius, 0, Math.PI * 2);
-                ctx.strokeStyle = RED;
-                ctx.lineWidth = 2;
-                ctx.stroke();
-                ctx.closePath();
-            }
-
-            isInside(x, y) {
-                return Math.hypot(x - this.centerX, y - this.centerY) <= this.radius;
+            isInside(position) {
+                return Math.hypot(position.x - this.center.x, position.z - this.center.z) <= this.radius;
             }
         }
 
-        function checkCollision(obj1X, obj1Y, obj1R, obj2X, obj2Y, obj2R) {
-            return Math.hypot(obj1X - obj2X, obj1Y - obj2Y) < obj1R + obj2R;
+        function checkCollision(pos1, r1, pos2, r2) {
+            return pos1.distanceTo(pos2) < r1 + r2;
         }
 
-        // Game variables
-        let player = new Player(SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2);
+        // Initialize
+        const player = new Player(0, 0);
         let ais = [];
         for (let i = 0; i < NUM_AI; i++) {
-            ais.push(new AI(Math.random() * SCREEN_WIDTH, Math.random() * SCREEN_HEIGHT));
+            const x = Math.random() * GROUND_SIZE - GROUND_SIZE / 2;
+            const z = Math.random() * GROUND_SIZE - GROUND_SIZE / 2;
+            ais.push(new AI(x, z));
         }
         let items = [];
         for (let i = 0; i < 10; i++) {
+            const x = Math.random() * GROUND_SIZE - GROUND_SIZE / 2;
+            const z = Math.random() * GROUND_SIZE - GROUND_SIZE / 2;
             const type = Math.random() < 0.5 ? 'weapon' : 'health';
-            items.push(new Item(Math.random() * SCREEN_WIDTH, Math.random() * SCREEN_HEIGHT, type));
+            items.push(new Item(x, z, type));
         }
         let bullets = [];
-        let zone = new Zone(SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2, INITIAL_ZONE_RADIUS);
+        const zone = new Zone(INITIAL_ZONE_RADIUS);
+
+        camera.position.set(0, 100, 0);
+        camera.lookAt(0, 0, 0);
 
         let keys = {};
+        window.addEventListener('keydown', (e) => { keys[e.key] = true; });
+        window.addEventListener('keyup', (e) => { keys[e.key] = false; });
+
+        let mouseDown = false;
         let mouseX = 0, mouseY = 0;
+        window.addEventListener('mousedown', (e) => { mouseDown = true; });
+        window.addEventListener('mouseup', (e) => { mouseDown = false; });
+        window.addEventListener('mousemove', (e) => {
+            mouseX = (e.clientX / window.innerWidth) * 2 - 1;
+            mouseY = -(e.clientY / window.innerHeight) * 2 + 1;
+        });
+
         let gameOver = false;
         let win = false;
 
-        // Event listeners
-        window.addEventListener('keydown', (e) => { keys[e.key] = true; });
-        window.addEventListener('keyup', (e) => { keys[e.key] = false; });
-        canvas.addEventListener('mousemove', (e) => {
-            const rect = canvas.getBoundingClientRect();
-            mouseX = e.clientX - rect.left;
-            mouseY = e.clientY - rect.top;
-        });
-        canvas.addEventListener('click', () => {
-            player.shoot(bullets);
-        });
+        // Health display (2D overlay)
+        const healthDiv = document.createElement('div');
+        healthDiv.style.position = 'absolute';
+        healthDiv.style.top = '10px';
+        healthDiv.style.left = '10px';
+        healthDiv.style.color = 'white';
+        healthDiv.style.fontSize = '24px';
+        document.body.appendChild(healthDiv);
 
-        function update() {
+        function animate() {
+            requestAnimationFrame(animate);
+
             if (gameOver) return;
 
-            // Clear canvas
-            ctx.fillStyle = BLACK;
-            ctx.fillRect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
-
             // Player movement
-            let dx = 0, dy = 0;
-            if (keys['w'] || keys['W']) dy -= PLAYER_SPEED;
-            if (keys['s'] || keys['S']) dy += PLAYER_SPEED;
+            let dx = 0, dz = 0;
+            if (keys['w'] || keys['W']) dz -= PLAYER_SPEED;
+            if (keys['s'] || keys['S']) dz += PLAYER_SPEED;
             if (keys['a'] || keys['A']) dx -= PLAYER_SPEED;
             if (keys['d'] || keys['D']) dx += PLAYER_SPEED;
-            if (dx !== 0 && dy !== 0) {
-                dx /= Math.sqrt(2);
-                dy /= Math.sqrt(2);
+            if (dx !== 0 || dz !== 0) {
+                const len = Math.hypot(dx, dz);
+                dx /= len;
+                dz /= len;
+                player.move(dx * PLAYER_SPEED, dz * PLAYER_SPEED);
             }
-            player.move(dx, dy);
 
-            // Update angle
-            player.angle = Math.atan2(mouseY - player.y, mouseX - player.x);
+            // Shooting
+            if (mouseDown) {
+                const raycaster = new THREE.Raycaster();
+                raycaster.setFromCamera(new THREE.Vector2(mouseX, mouseY), camera);
+                const intersects = raycaster.intersectObject(ground);
+                if (intersects.length > 0) {
+                    const point = intersects[0].point;
+                    const direction = new THREE.Vector3(point.x - player.position.x, 0, point.z - player.position.z);
+                    player.shoot(bullets, direction);
+                }
+                mouseDown = false; // Prevent continuous shooting
+            }
 
             // AI logic
             ais = ais.filter(ai => ai.health > 0);
             ais.forEach(ai => {
-                ai.moveTowards(player.x, player.y);
-                if (ai.hasWeapon && Math.random() < 0.01) {
-                    const aiAngle = Math.atan2(player.y - ai.y, player.x - ai.x);
-                    bullets.push(new Bullet(ai.x, ai.y, aiAngle));
+                ai.moveTowards(player.position);
+                if (ai.hasWeapon && Math.random() < 0.005) {
+                    const direction = new THREE.Vector3(player.position.x - ai.position.x, 0, player.position.z - ai.position.z);
+                    bullets.push(new Bullet(ai.position.clone(), direction));
                 }
             });
 
             // Update bullets
             bullets = bullets.filter(bullet => {
                 bullet.update();
-                if (bullet.x < 0 || bullet.x > SCREEN_WIDTH || bullet.y < 0 || bullet.y > SCREEN_HEIGHT) {
+                if (Math.abs(bullet.position.x) > GROUND_SIZE / 2 || Math.abs(bullet.position.z) > GROUND_SIZE / 2) {
+                    scene.remove(bullet.mesh);
                     return false;
                 }
 
                 // Hit player
-                if (checkCollision(bullet.x, bullet.y, BULLET_RADIUS, player.x, player.y, PLAYER_RADIUS)) {
+                if (checkCollision(bullet.position, BULLET_RADIUS, player.position, PLAYER_RADIUS)) {
                     player.health -= WEAPON_DAMAGE;
-                    if (player.health <= 0) {
-                        gameOver = true;
-                    }
+                    scene.remove(bullet.mesh);
+                    if (player.health <= 0) gameOver = true;
                     return false;
                 }
 
                 // Hit AI
-                ais.forEach((ai, index) => {
-                    if (checkCollision(bullet.x, bullet.y, BULLET_RADIUS, ai.x, ai.y, PLAYER_RADIUS)) {
-                        ai.health -= WEAPON_DAMAGE;
-                        if (ai.health <= 0) {
-                            ais.splice(index, 1);
+                for (let i = 0; i < ais.length; i++) {
+                    if (checkCollision(bullet.position, BULLET_RADIUS, ais[i].position, PLAYER_RADIUS)) {
+                        ais[i].health -= WEAPON_DAMAGE;
+                        if (ais[i].health <= 0) {
+                            scene.remove(ais[i].mesh);
+                            ais.splice(i, 1);
                         }
-                        bullets = bullets.filter(b => b !== bullet);
+                        scene.remove(bullet.mesh);
+                        return false;
                     }
-                });
-
+                }
                 return true;
             });
 
             // Pickup items
             items = items.filter(item => {
-                if (checkCollision(player.x, player.y, PLAYER_RADIUS, item.x, item.y, ITEM_RADIUS)) {
-                    if (item.type === 'weapon') {
-                        player.hasWeapon = true;
-                    } else if (item.type === 'health') {
-                        player.health = Math.min(PLAYER_HEALTH, player.health + 50);
-                    }
+                if (checkCollision(player.position, PLAYER_RADIUS, item.position, ITEM_RADIUS)) {
+                    if (item.type === 'weapon') player.hasWeapon = true;
+                    else if (item.type === 'health') player.health = Math.min(PLAYER_HEALTH, player.health + 50);
+                    scene.remove(item.mesh);
                     return false;
                 }
                 return true;
@@ -282,28 +300,20 @@
 
             // Zone
             zone.shrink();
-            if (!zone.isInside(player.x, player.y)) {
-                player.health -= 1;
+            if (!zone.isInside(player.position)) {
+                player.health -= 0.5;
                 if (player.health <= 0) gameOver = true;
             }
             ais.forEach(ai => {
-                if (!zone.isInside(ai.x, ai.y)) {
-                    ai.health -= 1;
-                }
+                if (!zone.isInside(ai.position)) ai.health -= 0.5;
             });
-            ais = ais.filter(ai => ai.health > 0);
-
-            // Draw
-            zone.draw();
-            player.draw();
-            ais.forEach(ai => ai.draw());
-            items.forEach(item => item.draw());
-            bullets.forEach(bullet => bullet.draw());
-
-            // Health text
-            ctx.font = '36px Arial';
-            ctx.fillStyle = WHITE;
-            ctx.fillText(`Health: ${Math.floor(player.health)}`, 10, 40);
+            ais = ais.filter(ai => {
+                if (ai.health <= 0) {
+                    scene.remove(ai.mesh);
+                    return false;
+                }
+                return true;
+            });
 
             // Win condition
             if (ais.length === 0) {
@@ -311,15 +321,40 @@
                 gameOver = true;
             }
 
+            // Update health display
+            healthDiv.textContent = `Health: ${Math.floor(player.health)}`;
+
+            // Game over display
             if (gameOver) {
-                ctx.fillStyle = win ? GREEN : RED;
-                ctx.fillText(win ? 'You Win!' : 'Game Over', SCREEN_WIDTH / 2 - 100, SCREEN_HEIGHT / 2);
+                const message = win ? 'You Win!' : 'Game Over';
+                const overDiv = document.createElement('div');
+                overDiv.style.position = 'absolute';
+                overDiv.style.top = '50%';
+                overDiv.style.left = '50%';
+                overDiv.style.transform = 'translate(-50%, -50%)';
+                overDiv.style.color = win ? 'green' : 'red';
+                overDiv.style.fontSize = '48px';
+                overDiv.textContent = message;
+                document.body.appendChild(overDiv);
             }
 
-            requestAnimationFrame(update);
+            // Camera follow player (top-down)
+            camera.position.x = player.position.x;
+            camera.position.z = player.position.z - 50;
+            camera.position.y = 50;
+            camera.lookAt(player.position.x, 0, player.position.z);
+
+            renderer.render(scene, camera);
         }
 
-        update();
+        animate();
+
+        // Resize handler
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
     </script>
 </body>
 </html>
