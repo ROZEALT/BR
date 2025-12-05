@@ -270,3 +270,31 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+# For bullet collisions, add a flag to track if bullet should be removed:
+for bullet in bullets[:]:
+    bullet.update()
+    if bullet.x < 0 or bullet.x > SCREEN_WIDTH or bullet.y < 0 or bullet.y > SCREEN_HEIGHT:
+        bullets.remove(bullet)
+        continue
+
+    bullet_hit = False
+    
+    # Check bullet hit player
+    if check_collision(bullet.x, bullet.y, BULLET_RADIUS, player.x, player.y, PLAYER_RADIUS):
+        player.health -= WEAPON_DAMAGE
+        bullet_hit = True
+        if player.health <= 0:
+            running = False
+
+    # Check bullet hit AI
+    if not bullet_hit:  # Only check if bullet didn't already hit player
+        for ai in ais[:]:
+            if check_collision(bullet.x, bullet.y, BULLET_RADIUS, ai.x, ai.y, PLAYER_RADIUS):
+                ai.health -= WEAPON_DAMAGE
+                bullet_hit = True
+                break
+    
+    if bullet_hit and bullet in bullets:
+        bullets.remove(bullet)
+        
